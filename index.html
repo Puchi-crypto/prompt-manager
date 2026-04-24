@@ -3,15 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>プロンプトマネージャー 高機能版</title>
-    <!-- Tailwind CSS -->
+    <title>プロンプトマネージャー 拡張版</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React & ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Marked (Markdown変換) -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -20,17 +16,18 @@
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         .resizer { cursor: col-resize; width: 4px; background-color: #f1f5f9; transition: background-color 0.2s; }
         .resizer:hover, .resizer:active { background-color: #3b82f6; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
         
-        /* Markdown プレビュー用のスタイル */
-        .markdown-body h1 { font-size: 1.5em; font-weight: bold; margin-bottom: 0.5em; border-bottom: 1px solid #eee; }
-        .markdown-body h2 { font-size: 1.25em; font-weight: bold; margin-bottom: 0.5em; margin-top: 1em; }
-        .markdown-body p { margin-bottom: 1em; }
+        /* Markdown プレビュー用スタイル */
+        .markdown-body h1 { font-size: 1.5em; font-weight: bold; margin-bottom: 0.5em; border-bottom: 1px solid #eee; padding-bottom: 0.2em;}
+        .markdown-body h2 { font-size: 1.25em; font-weight: bold; margin-bottom: 0.5em; margin-top: 1em; color: #1e293b; }
+        .markdown-body p { margin-bottom: 1em; line-height: 1.6; }
         .markdown-body ul { list-style-type: disc; margin-left: 1.5em; margin-bottom: 1em; }
         .markdown-body ol { list-style-type: decimal; margin-left: 1.5em; margin-bottom: 1em; }
-        .markdown-body code { background: #f1f5f9; padding: 0.2em 0.4em; border-radius: 3px; font-family: monospace; }
-        .markdown-body pre { background: #1e293b; color: #fff; padding: 1em; border-radius: 5px; overflow-x: auto; margin-bottom: 1em; }
+        .markdown-body code { background: #f1f5f9; padding: 0.2em 0.4em; border-radius: 3px; font-family: monospace; font-size: 0.9em; color: #db2777; }
+        .markdown-body pre { background: #1e293b; color: #f8fafc; padding: 1em; border-radius: 5px; overflow-x: auto; margin-bottom: 1em; }
         .markdown-body pre code { background: transparent; color: inherit; padding: 0; }
-        .markdown-body blockquote { border-left: 4px solid #cbd5e1; padding-left: 1em; color: #64748b; }
+        .markdown-body blockquote { border-left: 4px solid #cbd5e1; padding-left: 1em; color: #64748b; margin-left: 0; }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800 h-screen overflow-hidden">
@@ -39,35 +36,52 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
+        // デフォルトの定型文
+        const defaultTemplates = [
+            { id: 't1', name: '# 前提条件', text: '\n# 前提条件\n- ' },
+            { id: 't2', name: '# 指示', text: '\n# 指示\n- ' },
+            { id: 't3', name: '# 出力形式', text: '\n# 出力形式\n- ' },
+            { id: 't4', name: '変数 [ ]', text: '[入力テキスト]' }
+        ];
+
         const App = () => {
-            // ステート管理
             const [prompts, setPrompts] = useState([]);
             const [folders, setFolders] = useState([]);
+            const [templates, setTemplates] = useState(defaultTemplates);
+            
             const [activeId, setActiveId] = useState(null);
             const [sidebarWidth, setSidebarWidth] = useState(280);
             const [copied, setCopied] = useState(false);
             const [searchTerm, setSearchTerm] = useState('');
             const [viewMode, setViewMode] = useState('edit');
             
+            // 定型文編集モーダル用ステート
+            const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+            const [editingTemplates, setEditingTemplates] = useState([]);
+
             const textareaRef = useRef(null);
 
-            // 初回読み込み
+            // 初回データ読み込み
             useEffect(() => {
                 const savedPrompts = localStorage.getItem('pm_prompts');
                 const savedFolders = localStorage.getItem('pm_folders');
+                const savedTemplates = localStorage.getItem('pm_templates');
+                
                 if (savedPrompts) setPrompts(JSON.parse(savedPrompts));
                 if (savedFolders) setFolders(JSON.parse(savedFolders));
+                if (savedTemplates) setTemplates(JSON.parse(savedTemplates));
             }, []);
 
             // データ保存
             useEffect(() => {
                 localStorage.setItem('pm_prompts', JSON.stringify(prompts));
                 localStorage.setItem('pm_folders', JSON.stringify(folders));
-            }, [prompts, folders]);
+                localStorage.setItem('pm_templates', JSON.stringify(templates));
+            }, [prompts, folders, templates]);
 
             const activePrompt = prompts.find(p => p.id === activeId);
 
-            // 新規プロンプト作成
+            // アクション
             const createPrompt = () => {
                 const newPrompt = { id: Date.now().toString(), title: '無題のプロンプト', content: '', folderId: null, history: [] };
                 setPrompts([newPrompt, ...prompts]);
@@ -75,12 +89,9 @@
                 setViewMode('edit');
             };
 
-            // 新規フォルダ作成
             const createFolder = () => {
                 const name = prompt('フォルダ名を入力してください:');
-                if (name) {
-                    setFolders([...folders, { id: 'folder_' + Date.now(), name, isExpanded: true }]);
-                }
+                if (name) setFolders([...folders, { id: 'folder_' + Date.now(), name, isExpanded: true }]);
             };
 
             const updatePrompt = (id, updates) => setPrompts(prompts.map(p => p.id === id ? { ...p, ...updates } : p));
@@ -94,13 +105,12 @@
 
             const deleteFolder = (folderId, e) => {
                 e.stopPropagation();
-                if(confirm('フォルダを削除しますか？\n（中のプロンプトはフォルダ外に移動されます）')) {
+                if(confirm('フォルダを削除しますか？\n（中のプロンプトは未分類に移動します）')) {
                     setPrompts(prompts.map(p => p.folderId === folderId ? { ...p, folderId: null } : p));
                     setFolders(folders.filter(f => f.id !== folderId));
                 }
             };
 
-            // コピー機能
             const copyToClipboard = () => {
                 if (!activePrompt) return;
                 navigator.clipboard.writeText(activePrompt.content).then(() => {
@@ -109,55 +119,63 @@
                 });
             };
 
-            // 履歴保存
             const saveHistory = () => {
                 if (!activePrompt) return;
-                const newHistory = [
-                    { time: new Date().toLocaleString(), content: activePrompt.content },
-                    ...(activePrompt.history || [])
-                ].slice(0, 10); // 最大10件
+                const newHistory = [{ time: new Date().toLocaleString(), content: activePrompt.content }, ...(activePrompt.history || [])].slice(0, 10);
                 updatePrompt(activeId, { history: newHistory });
-                alert('現在の状態を履歴に保存しました');
+                alert('履歴に保存しました');
             };
 
-            // ドラッグ＆ドロップ処理
-            const onDragStart = (e, promptId) => {
-                e.dataTransfer.setData('promptId', promptId);
+            // 定型文モーダルの処理
+            const openTemplateModal = () => {
+                // 現在の設定をコピーしてモーダルを開く
+                setEditingTemplates([...templates]);
+                setIsTemplateModalOpen(true);
             };
+
+            const saveTemplates = () => {
+                // 空の名前のものは除外して保存
+                const validTemplates = editingTemplates.filter(t => t.name.trim() !== '');
+                setTemplates(validTemplates);
+                setIsTemplateModalOpen(false);
+            };
+
+            // D&D
+            const onDragStart = (e, promptId) => e.dataTransfer.setData('promptId', promptId);
             const onDragOver = (e) => e.preventDefault();
             const onDropToFolder = (e, folderId) => {
                 e.preventDefault();
-                e.stopPropagation(); // バブリング（誤作動）を防止する処理を追加
+                e.stopPropagation();
                 const promptId = e.dataTransfer.getData('promptId');
                 if(promptId) updatePrompt(promptId, { folderId });
             };
 
-            // ツールバー（エディタ操作）
-            const insertText = (before, after = '') => {
+            // 高度なテキスト挿入処理
+            const insertText = (prefix, suffix = '') => {
                 if (!textareaRef.current || !activePrompt) return;
                 const textarea = textareaRef.current;
                 const start = textarea.selectionStart;
                 const end = textarea.selectionEnd;
                 const text = textarea.value;
-                const newText = text.substring(0, start) + before + text.substring(start, end) + after + text.substring(end);
+                const selectedText = text.substring(start, end);
+                
+                const newText = text.substring(0, start) + prefix + selectedText + suffix + text.substring(end);
                 updatePrompt(activeId, { content: newText });
                 
                 setTimeout(() => {
                     textarea.focus();
-                    textarea.setSelectionRange(start + before.length, end + before.length);
+                    if (selectedText.length > 0) {
+                        textarea.setSelectionRange(start + prefix.length, end + prefix.length);
+                    } else {
+                        textarea.setSelectionRange(start + prefix.length, start + prefix.length);
+                    }
                 }, 0);
             };
 
-            const execUndo = () => document.execCommand('undo');
-            const execRedo = () => document.execCommand('redo');
-
-            // バックアップ機能
+            // バックアップ
             const exportData = () => {
-                const data = JSON.stringify({ prompts, folders });
-                const blob = new Blob([data], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
-                a.href = url;
+                a.href = URL.createObjectURL(new Blob([JSON.stringify({ prompts, folders, templates })], { type: 'application/json' }));
                 a.download = `prompt_backup_${new Date().toLocaleDateString().replace(/\//g, '')}.json`;
                 a.click();
             };
@@ -171,21 +189,20 @@
                         const data = JSON.parse(event.target.result);
                         if(data.prompts) setPrompts(data.prompts);
                         if(data.folders) setFolders(data.folders);
-                        alert('データを復元しました。');
-                    } catch (err) {
-                        alert('ファイルの読み込みに失敗しました。');
-                    }
+                        if(data.templates) setTemplates(data.templates);
+                        alert('復元完了しました。');
+                    } catch (err) { alert('読み込みに失敗しました。'); }
                 };
                 reader.readAsText(file);
             };
 
-            // サイドバーのリサイズ
-            const startResizing = React.useCallback((mouseDownEvent) => {
+            // リサイズ
+            const startResizing = React.useCallback((e) => {
                 const startWidth = sidebarWidth;
-                const startPosition = mouseDownEvent.clientX;
-                const onMouseMove = (mouseMoveEvent) => {
-                    const newWidth = startWidth + mouseMoveEvent.clientX - startPosition;
-                    if (newWidth > 200 && newWidth < 600) setSidebarWidth(newWidth);
+                const startX = e.clientX;
+                const onMouseMove = (me) => {
+                    const newW = startWidth + me.clientX - startX;
+                    if (newW > 200 && newW < 600) setSidebarWidth(newW);
                 };
                 const onMouseUp = () => {
                     document.removeEventListener("mousemove", onMouseMove);
@@ -195,197 +212,174 @@
                 document.addEventListener("mouseup", onMouseUp);
             }, [sidebarWidth]);
 
-            const filteredPrompts = prompts.filter(p => 
-                p.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                p.content.toLowerCase().includes(searchTerm.toLowerCase())
-            );
+            const filteredPrompts = prompts.filter(p => p.title.toLowerCase().includes(searchTerm.toLowerCase()) || p.content.toLowerCase().includes(searchTerm.toLowerCase()));
 
-            // プロンプトアイテムのUI
             const PromptItem = ({ prompt }) => (
-                <div 
-                    draggable
-                    onDragStart={(e) => onDragStart(e, prompt.id)}
-                    onClick={() => setActiveId(prompt.id)}
-                    className={`p-2 mb-1 rounded cursor-pointer border transition-all text-xs ${activeId === prompt.id ? 'bg-blue-50 border-blue-300 shadow-sm' : 'bg-white border-gray-100 hover:border-gray-300'}`}
-                >
-                    <div className="font-medium text-gray-800 truncate text-sm">{prompt.title || '無題'}</div>
+                <div draggable onDragStart={(e) => onDragStart(e, prompt.id)} onClick={() => setActiveId(prompt.id)}
+                    className={`p-2 mb-1 rounded cursor-pointer border transition-all text-xs ${activeId === prompt.id ? 'bg-blue-50 border-blue-300 shadow-sm' : 'bg-white border-gray-100 hover:border-gray-300'}`}>
+                    <div className="font-bold text-gray-800 truncate text-sm">{prompt.title || '無題'}</div>
                     <div className="text-gray-400 truncate mt-0.5">{prompt.content || '...'}</div>
                 </div>
             );
 
             return (
-                <div className="flex h-screen w-full font-sans">
+                <div className="flex h-screen w-full font-sans relative">
                     
-                    {/* --- 左側：サイドバー --- */}
-                    <div 
-                        className={`flex flex-col bg-slate-50 border-r border-slate-200 ${activeId ? 'hidden md:flex' : 'flex w-full'}`}
-                        style={{ width: window.innerWidth >= 768 ? `${sidebarWidth}px` : '100%' }}
-                    >
-                        <div className="p-3 border-b bg-white flex flex-col gap-2">
+                    {/* 左側：サイドバー */}
+                    <div className={`flex flex-col bg-slate-50 border-r border-slate-200 ${activeId ? 'hidden md:flex' : 'flex w-full'}`} style={{ width: window.innerWidth >= 768 ? `${sidebarWidth}px` : '100%' }}>
+                        <div className="p-3 border-b bg-white flex flex-col gap-2 shadow-sm z-10">
                             <div className="flex justify-between items-center">
-                                <h1 className="font-bold text-gray-700">プロンプト管理</h1>
+                                <h1 className="font-black text-gray-700 tracking-tight">Prompt Manager</h1>
                                 <div className="flex gap-1">
-                                    <button onClick={createFolder} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded" title="フォルダ作成">
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1h-3m-6 5a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-3z"></path></svg>
-                                    </button>
-                                    <button onClick={createPrompt} className="bg-blue-600 text-white p-1.5 rounded hover:bg-blue-700" title="プロンプト作成">
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
-                                    </button>
+                                    <button onClick={createFolder} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded" title="フォルダ作成">📁+</button>
+                                    <button onClick={createPrompt} className="bg-blue-600 text-white px-2 py-1.5 text-sm font-bold rounded hover:bg-blue-700 shadow-sm" title="プロンプト作成">＋ 新規作成</button>
                                 </div>
                             </div>
-                            <input 
-                                type="text" 
-                                placeholder="🔍 検索..." 
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full text-sm p-1.5 border rounded outline-none focus:border-blue-400"
-                            />
+                            <div className="relative">
+                                <span className="absolute left-2 top-1.5 text-gray-400">🔍</span>
+                                <input type="text" placeholder="検索..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full text-sm pl-7 p-1.5 border rounded outline-none focus:border-blue-400 bg-gray-50 focus:bg-white transition" />
+                            </div>
                         </div>
 
-                        {/* ドラッグ＆ドロップ受け入れエリア（大外：フォルダ未分類へ） */}
                         <div className="flex-1 overflow-y-auto p-2" onDragOver={onDragOver} onDrop={(e) => onDropToFolder(e, null)}>
-                            {/* フォルダ一覧 */}
                             {!searchTerm && folders.map(folder => (
                                 <div key={folder.id} className="mb-2" onDragOver={onDragOver} onDrop={(e) => onDropToFolder(e, folder.id)}>
-                                    <div 
-                                        className="flex items-center justify-between p-1.5 bg-slate-200 text-slate-700 rounded cursor-pointer text-sm font-medium hover:bg-slate-300 transition"
-                                        onClick={() => setFolders(folders.map(f => f.id === folder.id ? { ...f, isExpanded: !f.isExpanded } : f))}
-                                    >
-                                        <div className="flex items-center gap-1">
-                                            <span>{folder.isExpanded ? '📂' : '📁'}</span> {folder.name}
-                                        </div>
-                                        <button onClick={(e) => deleteFolder(folder.id, e)} className="text-slate-400 hover:text-red-500">✕</button>
+                                    <div className="flex items-center justify-between p-1.5 bg-slate-200 text-slate-700 rounded cursor-pointer text-sm font-bold hover:bg-slate-300 transition"
+                                        onClick={() => setFolders(folders.map(f => f.id === folder.id ? { ...f, isExpanded: !f.isExpanded } : f))}>
+                                        <div className="flex items-center gap-1"><span>{folder.isExpanded ? '📂' : '📁'}</span> {folder.name}</div>
+                                        <button onClick={(e) => deleteFolder(folder.id, e)} className="text-slate-400 hover:text-red-500 px-1">✕</button>
                                     </div>
                                     {folder.isExpanded && (
-                                        <div className="pl-3 mt-1 border-l-2 border-slate-200 ml-2 min-h-[10px]" onDragOver={onDragOver} onDrop={(e) => onDropToFolder(e, folder.id)}>
+                                        <div className="pl-2 mt-1 border-l-2 border-slate-200 ml-2 min-h-[10px]" onDragOver={onDragOver} onDrop={(e) => onDropToFolder(e, folder.id)}>
                                             {filteredPrompts.filter(p => p.folderId === folder.id).map(p => <PromptItem key={p.id} prompt={p} />)}
                                         </div>
                                     )}
                                 </div>
                             ))}
-
-                            {/* フォルダ未分類 */}
                             <div className="mt-4 min-h-[50px]">
-                                {!searchTerm && <div className="text-xs text-slate-400 mb-1 ml-1">フォルダ未分類（ここへドロップで移動）</div>}
-                                {filteredPrompts.filter(p => searchTerm ? true : p.folderId === null).map(p => (
-                                    <PromptItem key={p.id} prompt={p} />
-                                ))}
+                                {!searchTerm && <div className="text-xs text-slate-400 font-bold mb-2 ml-1">フォルダ未分類</div>}
+                                {filteredPrompts.filter(p => searchTerm ? true : p.folderId === null).map(p => <PromptItem key={p.id} prompt={p} />)}
                             </div>
-                            
-                            {prompts.length === 0 && <p className="text-slate-400 text-xs text-center mt-10">プロンプトがありません</p>}
                         </div>
 
-                        <div className="p-2 border-t bg-slate-100 flex justify-between text-xs">
-                            <button onClick={exportData} className="text-slate-600 hover:text-blue-600">📥 バックアップ</button>
-                            <label className="text-slate-600 hover:text-blue-600 cursor-pointer">
-                                📤 復元
-                                <input type="file" accept=".json" className="hidden" onChange={importData} />
-                            </label>
+                        <div className="p-2 border-t bg-slate-100 flex justify-between text-xs font-bold text-slate-500">
+                            <button onClick={exportData} className="hover:text-blue-600">📥 バックアップ</button>
+                            <label className="hover:text-blue-600 cursor-pointer">📤 復元<input type="file" accept=".json" className="hidden" onChange={importData} /></label>
                         </div>
                     </div>
 
-                    {/* リサイザー */}
                     <div className="hidden md:block resizer" onMouseDown={startResizing}></div>
 
-                    {/* --- 右側：エディタ --- */}
+                    {/* 右側：エディタ */}
                     <div className={`flex-1 flex flex-col bg-white ${!activeId ? 'hidden md:flex' : 'flex w-full'}`}>
                         {activePrompt ? (
                             <>
                                 {/* ヘッダー */}
                                 <div className="p-3 md:p-4 border-b bg-white">
-                                    <div className="flex justify-between items-center mb-3">
-                                        <button onClick={() => setActiveId(null)} className="md:hidden text-gray-500 flex items-center gap-1 text-sm bg-gray-100 px-2 py-1 rounded">
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>一覧へ
-                                        </button>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <button onClick={() => setActiveId(null)} className="md:hidden text-gray-600 flex items-center gap-1 text-sm bg-gray-100 px-3 py-1 rounded font-bold">← 戻る</button>
                                         <div className="flex gap-2 ml-auto">
-                                            <button onClick={() => deletePrompt(activePrompt.id)} className="px-3 py-1.5 text-xs font-bold text-red-500 border border-red-200 hover:bg-red-50 rounded transition">削除</button>
-                                            <button onClick={saveHistory} className="px-3 py-1.5 text-xs font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded transition">履歴保存</button>
-                                            <button onClick={copyToClipboard} className={`flex items-center gap-1 px-4 py-1.5 text-sm font-bold text-white rounded transition shadow-sm ${copied ? 'bg-green-500' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                                            <button onClick={() => deletePrompt(activePrompt.id)} className="px-3 py-1.5 text-xs font-bold text-red-500 hover:bg-red-50 rounded">削除</button>
+                                            <button onClick={saveHistory} className="px-3 py-1.5 text-xs font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded bg-white shadow-sm">履歴保存</button>
+                                            <button onClick={copyToClipboard} className={`flex items-center gap-1 px-5 py-1.5 text-sm font-bold text-white rounded transition shadow ${copied ? 'bg-green-500' : 'bg-blue-600 hover:bg-blue-700'}`}>
                                                 {copied ? '✔ コピー完了' : '📋 コピー'}
                                             </button>
                                         </div>
                                     </div>
-
                                     <div className="flex flex-col gap-2">
-                                        <input 
-                                            type="text" 
-                                            value={activePrompt.title}
-                                            onChange={(e) => updatePrompt(activeId, { title: e.target.value })}
-                                            placeholder="プロンプトのタイトル"
-                                            className="text-xl md:text-2xl font-bold border-none outline-none w-full bg-transparent placeholder-gray-300 focus:ring-0"
-                                        />
-                                        {/* スマホでもフォルダ移動ができるセレクトボックス */}
-                                        <div className="flex items-center gap-2 text-sm text-slate-500">
-                                            <span>📁 所属フォルダ:</span>
-                                            <select 
-                                                value={activePrompt.folderId || ''} 
-                                                onChange={(e) => updatePrompt(activeId, { folderId: e.target.value || null })}
-                                                className="border rounded p-1 bg-slate-50 outline-none focus:border-blue-400"
-                                            >
+                                        <input type="text" value={activePrompt.title} onChange={(e) => updatePrompt(activeId, { title: e.target.value })}
+                                            placeholder="プロンプトのタイトル" className="text-xl md:text-2xl font-bold border-none outline-none w-full bg-transparent placeholder-gray-300 focus:ring-0" />
+                                        <div className="flex items-center gap-2 text-sm text-slate-500 font-bold">
+                                            📁 所属: 
+                                            <select value={activePrompt.folderId || ''} onChange={(e) => updatePrompt(activeId, { folderId: e.target.value || null })} className="border rounded p-0.5 bg-slate-50 outline-none focus:border-blue-400 font-normal">
                                                 <option value="">未分類</option>
-                                                {folders.map(f => (
-                                                    <option key={f.id} value={f.id}>{f.name}</option>
-                                                ))}
+                                                {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                                             </select>
                                         </div>
                                     </div>
                                 </div>
 
                                 {/* ツールバー＆タブ */}
-                                <div className="flex justify-between items-center bg-slate-50 border-b px-4 py-1 text-sm text-slate-600">
-                                    <div className="flex gap-4">
-                                        <button onClick={() => setViewMode('edit')} className={`py-2 border-b-2 ${viewMode==='edit'?'border-blue-500 text-blue-600 font-bold':'border-transparent hover:text-gray-800'}`}>✏️ 編集</button>
-                                        <button onClick={() => setViewMode('preview')} className={`py-2 border-b-2 ${viewMode==='preview'?'border-blue-500 text-blue-600 font-bold':'border-transparent hover:text-gray-800'}`}>👁️ MDプレビュー</button>
+                                <div className="flex flex-col sm:flex-row justify-between sm:items-center bg-slate-50 border-b px-2 sm:px-4 text-sm text-slate-600 overflow-x-auto hide-scrollbar">
+                                    <div className="flex gap-4 border-b sm:border-none min-w-max">
+                                        <button onClick={() => setViewMode('edit')} className={`py-2 px-1 border-b-2 transition ${viewMode==='edit'?'border-blue-500 text-blue-600 font-bold':'border-transparent hover:text-gray-800'}`}>✏️ 編集</button>
+                                        <button onClick={() => setViewMode('preview')} className={`py-2 px-1 border-b-2 transition ${viewMode==='preview'?'border-blue-500 text-blue-600 font-bold':'border-transparent hover:text-gray-800'}`}>👁️ MDプレビュー</button>
                                     </div>
                                     
                                     {viewMode === 'edit' && (
-                                        <div className="hidden md:flex gap-1 items-center border-l pl-3 ml-2">
-                                            <button onClick={execUndo} className="p-1 hover:bg-slate-200 rounded" title="元に戻す">↩️</button>
-                                            <button onClick={execRedo} className="p-1 hover:bg-slate-200 rounded" title="やり直し">↪️</button>
+                                        <div className="flex gap-1 items-center py-1 sm:py-0 sm:border-l sm:pl-3 sm:ml-2 min-w-max">
+                                            {/* 定型文セレクトボックス */}
+                                            <select 
+                                                onChange={(e) => { 
+                                                    if(e.target.value === 'edit') {
+                                                        openTemplateModal();
+                                                    } else if(e.target.value) {
+                                                        const tmpl = templates.find(t => t.id === e.target.value);
+                                                        if(tmpl) insertText(tmpl.text); 
+                                                    }
+                                                    e.target.value=""; 
+                                                }} 
+                                                className="text-xs border border-gray-300 rounded bg-white p-1 mr-1 font-bold outline-none cursor-pointer"
+                                            >
+                                                <option value="">+ 定型文</option>
+                                                {templates.map(t => (
+                                                    <option key={t.id} value={t.id}>{t.name}</option>
+                                                ))}
+                                                <option disabled>──────────</option>
+                                                <option value="edit">⚙️ 定型文を編集...</option>
+                                            </select>
+                                            
                                             <div className="w-px h-4 bg-slate-300 mx-1"></div>
-                                            <button onClick={() => insertText('**', '**')} className="p-1 hover:bg-slate-200 rounded font-bold" title="太字">B</button>
-                                            <button onClick={() => insertText('\n- ')} className="p-1 hover:bg-slate-200 rounded" title="リスト">📄</button>
+                                            
+                                            <button onClick={() => insertText('**', '**')} className="w-7 h-7 flex items-center justify-center hover:bg-slate-200 rounded font-serif font-bold text-black" title="太字">B</button>
+                                            <button onClick={() => insertText('*', '*')} className="w-7 h-7 flex items-center justify-center hover:bg-slate-200 rounded font-serif italic text-black" title="斜体">I</button>
+                                            <button onClick={() => insertText('\n## ')} className="w-7 h-7 flex items-center justify-center hover:bg-slate-200 rounded font-bold text-black" title="見出し(H2)">H</button>
+                                            <div className="w-px h-4 bg-slate-300 mx-1"></div>
+                                            <button onClick={() => insertText('\n- ')} className="w-7 h-7 flex items-center justify-center hover:bg-slate-200 rounded font-bold" title="箇条書き">≡</button>
+                                            <button onClick={() => insertText('\n1. ')} className="w-7 h-7 flex items-center justify-center hover:bg-slate-200 rounded font-bold" title="番号付きリスト">1.</button>
+                                            <button onClick={() => insertText('\n> ')} className="w-7 h-7 flex items-center justify-center hover:bg-slate-200 rounded font-bold text-lg font-serif" title="引用">”</button>
+                                            <button onClick={() => insertText('\n```\n', '\n```\n')} className="w-7 h-7 flex items-center justify-center hover:bg-slate-200 rounded font-bold text-xs" title="コードブロック">&lt;&gt;</button>
                                         </div>
                                     )}
                                 </div>
 
                                 {/* 本文 */}
-                                <div className="flex-1 p-4 flex flex-col relative overflow-hidden bg-gray-50">
+                                <div className="flex-1 p-3 md:p-4 flex flex-col relative bg-gray-100 overflow-hidden">
                                     {viewMode === 'edit' ? (
                                         <>
                                             <textarea
                                                 ref={textareaRef}
                                                 value={activePrompt.content}
                                                 onChange={(e) => updatePrompt(activeId, { content: e.target.value })}
-                                                placeholder="ここにプロンプトを入力してください... (Markdown対応)"
-                                                className="w-full flex-1 p-4 border border-gray-200 shadow-inner rounded bg-white outline-none focus:border-blue-400 resize-none font-mono text-sm leading-relaxed"
+                                                placeholder="ここにプロンプトを入力してください...&#13;&#10;上部のツールバーで装飾や定型文の挿入ができます。"
+                                                className="w-full flex-1 p-4 border border-gray-300 shadow-inner rounded-t bg-white outline-none focus:border-blue-400 resize-none font-mono text-sm leading-relaxed"
                                             ></textarea>
                                             
-                                            {/* 履歴の復元 UI */}
-                                            {activePrompt.history && activePrompt.history.length > 0 && (
-                                                <div className="mt-3 p-2 bg-slate-100 rounded border border-slate-200">
-                                                    <label className="text-xs text-slate-500 font-bold block mb-1">⏱ 過去の履歴から復元する</label>
+                                            {/* 文字数カウントと履歴復元 */}
+                                            <div className="bg-white border border-t-0 border-gray-300 rounded-b px-3 py-1.5 flex justify-between items-center shadow-inner">
+                                                <div className="text-xs font-bold text-gray-500">
+                                                    文字数: {activePrompt.content.length} 文字
+                                                </div>
+                                                {activePrompt.history && activePrompt.history.length > 0 && (
                                                     <select 
-                                                        className="w-full p-1 border rounded text-sm bg-white outline-none"
+                                                        className="text-xs p-1 border rounded bg-slate-50 outline-none text-slate-600"
                                                         onChange={(e) => {
                                                             if(e.target.value !== "" && confirm('現在のテキストを上書きして復元しますか？')) {
-                                                                updatePrompt(activeId, { content: e.target.value });
-                                                                e.target.value = ""; // 選択リセット
+                                                                updatePrompt(activeId, { content: e.target.value }); e.target.value = "";
                                                             }
                                                         }}
                                                     >
-                                                        <option value="">履歴を選択...</option>
-                                                        {activePrompt.history.map((h, i) => (
-                                                            <option key={i} value={h.content}>{h.time}</option>
-                                                        ))}
+                                                        <option value="">⏱ 履歴から復元...</option>
+                                                        {activePrompt.history.map((h, i) => <option key={i} value={h.content}>{h.time}</option>)}
                                                     </select>
-                                                </div>
-                                            )}
+                                                )}
+                                            </div>
                                         </>
                                     ) : (
                                         <div 
-                                            className="w-full h-full p-4 border border-gray-200 rounded bg-white overflow-y-auto markdown-body"
-                                            dangerouslySetInnerHTML={{ __html: marked.parse(activePrompt.content || '*プレビューするテキストがありません*') }}
+                                            className="w-full h-full p-6 border border-gray-200 shadow-sm rounded bg-white overflow-y-auto markdown-body"
+                                            // breaks: true を追加し、ユーザーの改行をそのまま反映
+                                            dangerouslySetInnerHTML={{ __html: marked.parse(activePrompt.content || '*プレビューするテキストがありません*', { breaks: true }) }}
                                         ></div>
                                     )}
                                 </div>
@@ -397,6 +391,67 @@
                             </div>
                         )}
                     </div>
+
+                    {/* 定型文編集モーダル */}
+                    {isTemplateModalOpen && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                            <div className="bg-white rounded-lg shadow-xl w-full max-w-lg flex flex-col max-h-[90vh]">
+                                <div className="p-4 border-b flex justify-between items-center bg-slate-50 rounded-t-lg">
+                                    <h2 className="font-bold text-gray-800">⚙️ 定型文の編集</h2>
+                                    <button onClick={() => setIsTemplateModalOpen(false)} className="text-gray-500 hover:text-gray-800 font-bold">✕</button>
+                                </div>
+                                
+                                <div className="p-4 overflow-y-auto flex-1 flex flex-col gap-4 bg-gray-50">
+                                    {editingTemplates.map((tmpl, index) => (
+                                        <div key={tmpl.id} className="bg-white p-3 border rounded shadow-sm relative">
+                                            <button 
+                                                onClick={() => setEditingTemplates(editingTemplates.filter(t => t.id !== tmpl.id))}
+                                                className="absolute top-2 right-2 text-red-400 hover:text-red-600 text-xs font-bold px-2 py-1 rounded bg-red-50"
+                                            >削除</button>
+                                            
+                                            <label className="block text-xs font-bold text-gray-600 mb-1">表示名 (リストに出る名前)</label>
+                                            <input 
+                                                type="text" 
+                                                value={tmpl.name} 
+                                                onChange={(e) => {
+                                                    const newT = [...editingTemplates];
+                                                    newT[index].name = e.target.value;
+                                                    setEditingTemplates(newT);
+                                                }}
+                                                className="w-full border p-1.5 rounded text-sm mb-2 outline-none focus:border-blue-400" 
+                                                placeholder="例: 前提条件"
+                                            />
+                                            
+                                            <label className="block text-xs font-bold text-gray-600 mb-1">挿入されるテキスト (改行も反映されます)</label>
+                                            <textarea 
+                                                value={tmpl.text}
+                                                onChange={(e) => {
+                                                    const newT = [...editingTemplates];
+                                                    newT[index].text = e.target.value;
+                                                    setEditingTemplates(newT);
+                                                }}
+                                                className="w-full border p-2 rounded text-sm font-mono outline-none focus:border-blue-400 resize-y min-h-[60px]"
+                                                placeholder="挿入したい内容を入力"
+                                            ></textarea>
+                                        </div>
+                                    ))}
+                                    
+                                    <button 
+                                        onClick={() => setEditingTemplates([...editingTemplates, { id: 't_' + Date.now(), name: '新しい定型文', text: '' }])}
+                                        className="w-full py-3 border-2 border-dashed border-gray-300 text-gray-500 font-bold rounded hover:bg-gray-100 hover:border-gray-400 transition"
+                                    >
+                                        ＋ 定型文を追加する
+                                    </button>
+                                </div>
+
+                                <div className="p-4 border-t flex justify-end gap-2 bg-white rounded-b-lg">
+                                    <button onClick={() => setIsTemplateModalOpen(false)} className="px-4 py-2 border rounded text-sm font-bold text-gray-600 hover:bg-gray-50">キャンセル</button>
+                                    <button onClick={saveTemplates} className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-bold hover:bg-blue-700">保存して閉じる</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                 </div>
             );
         };
