@@ -1,4 +1,4 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
@@ -187,9 +187,9 @@
                 });
             };
 
-            // スマホ対応：ボタンでの並び替え処理
+            // スマホ＆PCボタンでの並び替え処理
             const movePrompt = (e, id, direction) => {
-                e.stopPropagation();
+                e.stopPropagation(); // これによりクリック時に右画面へ飛ぶのを防ぐ
                 setPrompts(prev => {
                     const newArr = [...prev];
                     const index = newArr.findIndex(p => p.id === id);
@@ -282,7 +282,7 @@
 
             const filteredPrompts = prompts.filter(p => p.title.toLowerCase().includes(searchTerm.toLowerCase()) || p.content.toLowerCase().includes(searchTerm.toLowerCase()));
 
-            // リストに表示する項目UI（上下ボタン追加版）
+            // プロンプト項目UI（スマホでも絶対に見えるように改善）
             const PromptItem = ({ prompt, isFirst, isLast }) => (
                 <div 
                     draggable 
@@ -297,16 +297,20 @@
                         <div className="text-gray-400 truncate text-[10px] mt-0.5">{prompt.content || '...'}</div>
                     </div>
                     
-                    {/* スマホでも確実に並び替えができるボタン (PCではホバー時のみ表示) */}
-                    <div className="flex flex-col gap-0.5 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                    {/* ★修正ポイント：
+                        opacity-100: スマホでは常に表示
+                        lg:opacity-0 lg:group-hover:opacity-100: PC(lg以上)ではホバー時のみ表示
+                        shrink-0: 画面外に押し出されるのを防ぐ 
+                    */}
+                    <div className="flex flex-col gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity shrink-0">
                         <button 
                             onClick={(e) => movePrompt(e, prompt.id, 'up')} 
-                            className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${isFirst ? 'text-gray-300 border-gray-100 bg-transparent' : 'text-gray-500 hover:text-blue-600 bg-white border-gray-200 shadow-sm'}`}
+                            className={`px-2 py-0.5 rounded border text-[10px] font-bold shadow-sm active:bg-gray-100 ${isFirst ? 'text-gray-200 border-gray-100 bg-gray-50' : 'text-gray-500 hover:text-blue-600 bg-white border-gray-300'}`}
                             disabled={isFirst}
                         >▲</button>
                         <button 
                             onClick={(e) => movePrompt(e, prompt.id, 'down')} 
-                            className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${isLast ? 'text-gray-300 border-gray-100 bg-transparent' : 'text-gray-500 hover:text-blue-600 bg-white border-gray-200 shadow-sm'}`}
+                            className={`px-2 py-0.5 rounded border text-[10px] font-bold shadow-sm active:bg-gray-100 ${isLast ? 'text-gray-200 border-gray-100 bg-gray-50' : 'text-gray-500 hover:text-blue-600 bg-white border-gray-300'}`}
                             disabled={isLast}
                         >▼</button>
                     </div>
@@ -397,7 +401,7 @@
                             <>
                                 <div className="p-3 md:p-4 border-b bg-white">
                                     <div className="flex justify-between items-center mb-2">
-                                        <button onClick={() => setActiveId(null)} className="md:hidden text-gray-600 flex items-center gap-1 text-sm bg-gray-100 px-3 py-1 rounded font-bold">← 戻る</button>
+                                        <button onClick={() => setActiveId(null)} className="md:hidden text-gray-600 flex items-center gap-1 text-sm bg-gray-100 px-3 py-1 rounded font-bold shadow-sm active:bg-gray-200">← 戻る</button>
                                         <div className="flex gap-2 ml-auto">
                                             <button onClick={() => deletePrompt(activePrompt.id)} className="px-3 py-1.5 text-xs font-bold text-red-500 hover:bg-red-50 rounded">削除</button>
                                             <button onClick={saveHistory} className="px-3 py-1.5 text-xs font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded bg-white shadow-sm">履歴保存</button>
@@ -410,7 +414,7 @@
                                         <input type="text" value={activePrompt.title} onChange={(e) => updatePrompt(activeId, { title: e.target.value })}
                                             placeholder="プロンプトのタイトル" className="text-xl md:text-2xl font-bold border-none outline-none w-full bg-transparent placeholder-gray-300 focus:ring-0" />
                                         
-                                        {/* フォルダ移動のセレクトボックス（スマホはここから確実に移動できます） */}
+                                        {/* フォルダ移動のセレクトボックス */}
                                         <div className="flex items-center gap-2 text-xs text-slate-500 font-bold">
                                             📁 所属フォルダ: 
                                             <select value={activePrompt.folderId || ''} onChange={(e) => updatePrompt(activeId, { folderId: e.target.value || null })} className="border rounded p-0.5 bg-slate-50 outline-none focus:border-blue-400 font-normal">
