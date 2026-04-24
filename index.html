@@ -15,9 +15,6 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     
-    <!-- ★追加: スマホのタッチ画面でもドラッグ＆ドロップを可能にする魔法のスクリプト -->
-    <script src="https://cdn.jsdelivr.net/npm/drag-drop-touch@1.0.20/DragDropTouch.min.js"></script>
-    
     <style>
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -140,6 +137,7 @@
                 setIsTemplateModalOpen(false);
             };
 
+            // PC用ドラッグ＆ドロップ処理
             const onDragStart = (e, promptId) => e.dataTransfer.setData('promptId', promptId);
             const onDragOver = (e) => e.preventDefault();
             
@@ -185,6 +183,40 @@
                     
                     newArr.splice(dragIndex, 1);
                     newArr.unshift(draggedItem);
+                    return newArr;
+                });
+            };
+
+            // スマホ対応：ボタンでの並び替え処理
+            const movePrompt = (e, id, direction) => {
+                e.stopPropagation();
+                setPrompts(prev => {
+                    const newArr = [...prev];
+                    const index = newArr.findIndex(p => p.id === id);
+                    if (index === -1) return prev;
+                    
+                    const targetFolderId = newArr[index].folderId;
+                    let swapIndex = -1;
+
+                    if (direction === 'up') {
+                        for (let i = index - 1; i >= 0; i--) {
+                            if (newArr[i].folderId === targetFolderId) {
+                                swapIndex = i; break;
+                            }
+                        }
+                    } else {
+                        for (let i = index + 1; i < newArr.length; i++) {
+                            if (newArr[i].folderId === targetFolderId) {
+                                swapIndex = i; break;
+                            }
+                        }
+                    }
+
+                    if (swapIndex !== -1) {
+                        const temp = newArr[index];
+                        newArr[index] = newArr[swapIndex];
+                        newArr[swapIndex] = temp;
+                    }
                     return newArr;
                 });
             };
@@ -250,17 +282,34 @@
 
             const filteredPrompts = prompts.filter(p => p.title.toLowerCase().includes(searchTerm.toLowerCase()) || p.content.toLowerCase().includes(searchTerm.toLowerCase()));
 
-            const PromptItem = ({ prompt }) => (
+            // リストに表示する項目UI（上下ボタン追加版）
+            const PromptItem = ({ prompt, isFirst, isLast }) => (
                 <div 
                     draggable 
                     onDragStart={(e) => onDragStart(e, prompt.id)} 
                     onDragOver={onDragOver}
                     onDrop={(e) => onDropToItem(e, prompt.folderId, prompt.id)}
                     onClick={() => setActiveId(prompt.id)}
-                    className={`p-1.5 mb-0.5 rounded cursor-pointer border transition-all relative ${activeId === prompt.id ? 'bg-blue-50 border-blue-300' : 'bg-transparent border-transparent hover:bg-slate-200 hover:border-slate-300'}`}
+                    className={`group p-1.5 mb-0.5 rounded cursor-pointer border transition-all relative flex justify-between items-center ${activeId === prompt.id ? 'bg-blue-50 border-blue-300' : 'bg-transparent border-transparent hover:bg-slate-200 hover:border-slate-300'}`}
                 >
-                    <div className="font-bold text-gray-700 truncate text-xs pr-4">{prompt.title || '無題'}</div>
-                    <div className="text-gray-400 truncate text-[10px] mt-0.5">{prompt.content || '...'}</div>
+                    <div className="flex-1 min-w-0 pr-2">
+                        <div className="font-bold text-gray-700 truncate text-xs">{prompt.title || '無題'}</div>
+                        <div className="text-gray-400 truncate text-[10px] mt-0.5">{prompt.content || '...'}</div>
+                    </div>
+                    
+                    {/* スマホでも確実に並び替えができるボタン (PCではホバー時のみ表示) */}
+                    <div className="flex flex-col gap-0.5 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                            onClick={(e) => movePrompt(e, prompt.id, 'up')} 
+                            className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${isFirst ? 'text-gray-300 border-gray-100 bg-transparent' : 'text-gray-500 hover:text-blue-600 bg-white border-gray-200 shadow-sm'}`}
+                            disabled={isFirst}
+                        >▲</button>
+                        <button 
+                            onClick={(e) => movePrompt(e, prompt.id, 'down')} 
+                            className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${isLast ? 'text-gray-300 border-gray-100 bg-transparent' : 'text-gray-500 hover:text-blue-600 bg-white border-gray-200 shadow-sm'}`}
+                            disabled={isLast}
+                        >▼</button>
+                    </div>
                 </div>
             );
 
@@ -289,7 +338,11 @@
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-1.5" onDragOver={onDragOver} onDrop={(e) => onDropToFolderOnly(e, null)}>
-                            {!searchTerm && folders.map(folder => (
+                            
+                            {/* フォルダ一覧の表示 */}
+                            {!searchTerm && folders.map(folder => {
+                                const folderPrompts = filteredPrompts.filter(p => p.folderId === folder.id);
+                                return (
                                 <div key={folder.id} className="mb-1.5" onDragOver={onDragOver} onDrop={(e) => onDropToFolderOnly(e, folder.id)}>
                                     <div className="flex items-center justify-between px-1.5 py-1 bg-slate-200 text-slate-700 rounded cursor-pointer hover:bg-slate-300 transition"
                                         onClick={() => setFolders(folders.map(f => f.id === folder.id ? { ...f, isExpanded: !f.isExpanded } : f))}>
@@ -300,14 +353,33 @@
                                     </div>
                                     {folder.isExpanded && (
                                         <div className="pl-1 mt-0.5 border-l-2 border-slate-200 ml-2 min-h-[15px]" onDragOver={onDragOver} onDrop={(e) => onDropToFolderOnly(e, folder.id)}>
-                                            {filteredPrompts.filter(p => p.folderId === folder.id).map(p => <PromptItem key={p.id} prompt={p} />)}
+                                            {folderPrompts.map((p, index) => (
+                                                <PromptItem 
+                                                    key={p.id} 
+                                                    prompt={p} 
+                                                    isFirst={index === 0} 
+                                                    isLast={index === folderPrompts.length - 1} 
+                                                />
+                                            ))}
                                         </div>
                                     )}
                                 </div>
-                            ))}
+                            )})}
+
+                            {/* 未分類一覧の表示 */}
                             <div className="mt-3 min-h-[50px]">
                                 {!searchTerm && <div className="text-[10px] text-slate-400 font-bold mb-1 ml-1 tracking-wider border-b pb-1">未分類</div>}
-                                {filteredPrompts.filter(p => searchTerm ? true : p.folderId === null).map(p => <PromptItem key={p.id} prompt={p} />)}
+                                {(() => {
+                                    const unclassifiedPrompts = filteredPrompts.filter(p => searchTerm ? true : p.folderId === null);
+                                    return unclassifiedPrompts.map((p, index) => (
+                                        <PromptItem 
+                                            key={p.id} 
+                                            prompt={p} 
+                                            isFirst={index === 0} 
+                                            isLast={index === unclassifiedPrompts.length - 1} 
+                                        />
+                                    ));
+                                })()}
                             </div>
                         </div>
 
@@ -337,6 +409,8 @@
                                     <div className="flex flex-col gap-2">
                                         <input type="text" value={activePrompt.title} onChange={(e) => updatePrompt(activeId, { title: e.target.value })}
                                             placeholder="プロンプトのタイトル" className="text-xl md:text-2xl font-bold border-none outline-none w-full bg-transparent placeholder-gray-300 focus:ring-0" />
+                                        
+                                        {/* フォルダ移動のセレクトボックス（スマホはここから確実に移動できます） */}
                                         <div className="flex items-center gap-2 text-xs text-slate-500 font-bold">
                                             📁 所属フォルダ: 
                                             <select value={activePrompt.folderId || ''} onChange={(e) => updatePrompt(activeId, { folderId: e.target.value || null })} className="border rounded p-0.5 bg-slate-50 outline-none focus:border-blue-400 font-normal">
