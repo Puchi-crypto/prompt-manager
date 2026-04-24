@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
@@ -9,6 +9,10 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <!-- ★追加: スマホのタッチ画面でもドラッグ＆ドロップを可能にする魔法のスクリプト -->
+    <script src="https://cdn.jsdelivr.net/npm/drag-drop-touch@1.0.20/DragDropTouch.min.js"></script>
+    
     <style>
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -78,7 +82,6 @@
 
             const createPrompt = () => {
                 const newPrompt = { id: Date.now().toString(), title: '名称未設定', content: '', folderId: null, history: [] };
-                // 新規作成は常に一番上に追加
                 setPrompts([newPrompt, ...prompts]);
                 setActiveId(newPrompt.id);
                 setViewMode('edit');
@@ -132,11 +135,9 @@
                 setIsTemplateModalOpen(false);
             };
 
-            // D&D並び替えロジック
             const onDragStart = (e, promptId) => e.dataTransfer.setData('promptId', promptId);
             const onDragOver = (e) => e.preventDefault();
             
-            // アイテムの上にドロップした時（並び替え）
             const onDropToItem = (e, targetFolderId, targetPromptId) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -149,13 +150,13 @@
                     if(dragIndex === -1) return prev;
                     
                     const draggedItem = newArr[dragIndex];
-                    draggedItem.folderId = targetFolderId; // フォルダ移動も兼ねる
+                    draggedItem.folderId = targetFolderId;
 
-                    newArr.splice(dragIndex, 1); // 元の位置から削除
+                    newArr.splice(dragIndex, 1);
 
                     const targetIndex = newArr.findIndex(p => p.id === targetPromptId);
                     if(targetIndex !== -1) {
-                        newArr.splice(targetIndex, 0, draggedItem); // ターゲットの直前に挿入
+                        newArr.splice(targetIndex, 0, draggedItem);
                     } else {
                         newArr.unshift(draggedItem);
                     }
@@ -163,7 +164,6 @@
                 });
             };
 
-            // フォルダ全体や未分類エリアにドロップした時
             const onDropToFolderOnly = (e, targetFolderId) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -179,7 +179,7 @@
                     draggedItem.folderId = targetFolderId;
                     
                     newArr.splice(dragIndex, 1);
-                    newArr.unshift(draggedItem); // そのフォルダの先頭に移動
+                    newArr.unshift(draggedItem);
                     return newArr;
                 });
             };
@@ -245,7 +245,6 @@
 
             const filteredPrompts = prompts.filter(p => p.title.toLowerCase().includes(searchTerm.toLowerCase()) || p.content.toLowerCase().includes(searchTerm.toLowerCase()));
 
-            // プロンプトアイテム（並び替え・D&D対応）
             const PromptItem = ({ prompt }) => (
                 <div 
                     draggable 
@@ -253,9 +252,9 @@
                     onDragOver={onDragOver}
                     onDrop={(e) => onDropToItem(e, prompt.folderId, prompt.id)}
                     onClick={() => setActiveId(prompt.id)}
-                    className={`p-1.5 mb-0.5 rounded cursor-pointer border transition-all ${activeId === prompt.id ? 'bg-blue-50 border-blue-300' : 'bg-transparent border-transparent hover:bg-slate-200 hover:border-slate-300'}`}
+                    className={`p-1.5 mb-0.5 rounded cursor-pointer border transition-all relative ${activeId === prompt.id ? 'bg-blue-50 border-blue-300' : 'bg-transparent border-transparent hover:bg-slate-200 hover:border-slate-300'}`}
                 >
-                    <div className="font-bold text-gray-700 truncate text-xs">{prompt.title || '無題'}</div>
+                    <div className="font-bold text-gray-700 truncate text-xs pr-4">{prompt.title || '無題'}</div>
                     <div className="text-gray-400 truncate text-[10px] mt-0.5">{prompt.content || '...'}</div>
                 </div>
             );
@@ -263,10 +262,9 @@
             return (
                 <div className="flex h-screen w-full font-sans relative">
                     
-                    {/* 左側：サイドバー（シンプル化＆コンパクト化） */}
+                    {/* 左側：サイドバー */}
                     <div className={`flex flex-col bg-slate-100 ${activeId ? 'hidden md:flex' : 'flex w-full'}`} style={{ width: window.innerWidth >= 768 ? `${sidebarWidth}px` : '100%' }}>
                         
-                        {/* 左上ヘッダー */}
                         <div className="p-2 border-b bg-slate-100 flex flex-col gap-2 z-10">
                             <div className="flex justify-between items-center px-1">
                                 <div className="font-bold text-gray-500 text-sm tracking-widest">PROMPTS</div>
@@ -285,7 +283,6 @@
                             </div>
                         </div>
 
-                        {/* リスト領域 */}
                         <div className="flex-1 overflow-y-auto p-1.5" onDragOver={onDragOver} onDrop={(e) => onDropToFolderOnly(e, null)}>
                             {!searchTerm && folders.map(folder => (
                                 <div key={folder.id} className="mb-1.5" onDragOver={onDragOver} onDrop={(e) => onDropToFolderOnly(e, folder.id)}>
