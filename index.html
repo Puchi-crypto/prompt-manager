@@ -9,11 +9,12 @@
     <meta name="theme-color" content="#2563eb">
     <link rel="apple-touch-icon" href="./icon-192.png">
  
+    <!-- 外部ライブラリはバージョン固定。最新版自動取得による突然の白画面を避ける -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
     
     <style>
         ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -33,6 +34,8 @@
         .markdown-body pre { background: #1e293b; color: #f8fafc; padding: 1em; border-radius: 5px; overflow-x: auto; margin-bottom: 1em; }
         .markdown-body pre code { background: transparent; color: inherit; padding: 0; }
         .markdown-body blockquote { border-left: 4px solid #cbd5e1; padding-left: 1em; color: #64748b; margin-left: 0; }
+        .fatal-error { max-width: 760px; margin: 48px auto; padding: 24px; border: 1px solid #fecaca; border-radius: 12px; background: #fff1f2; color: #7f1d1d; font-family: system-ui, sans-serif; }
+        .fatal-error pre { white-space: pre-wrap; overflow-x: auto; background: #fff; padding: 12px; border-radius: 8px; border: 1px solid #fecaca; }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800 h-screen overflow-hidden">
@@ -40,6 +43,68 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
+
+        const showFatalError = (message, detail = '') => {
+            const root = document.getElementById('root');
+            if (!root) return;
+            root.innerHTML = `
+                <div class="fatal-error">
+                    <h1 style="font-size:20px;font-weight:700;margin-bottom:12px;">アプリの読み込みに失敗しました</h1>
+                    <p style="margin-bottom:12px;">保存データまたは外部ライブラリの読み込みでエラーが発生しています。</p>
+                    <p style="margin-bottom:12px;">下の内容をコピーして、修正依頼時に共有してください。</p>
+                    <pre>${String(message).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+${String(detail).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</pre>
+                    <button onclick="localStorage.removeItem('pm_prompts');localStorage.removeItem('pm_folders');localStorage.removeItem('pm_templates');location.reload();" style="margin-top:12px;padding:8px 12px;border-radius:8px;background:#dc2626;color:white;font-weight:700;">保存データを初期化して再読み込み</button>
+                </div>`;
+        };
+
+        window.addEventListener('error', (e) => {
+            console.error(e.error || e.message);
+        });
+
+        const safeJsonParse = (key, fallback) => {
+            const raw = localStorage.getItem(key);
+            if (!raw) return fallback;
+            try {
+                const parsed = JSON.parse(raw);
+                return parsed ?? fallback;
+            } catch (err) {
+                console.error(`${key} の読み込みに失敗しました`, err);
+                localStorage.setItem(`${key}_broken_${Date.now()}`, raw);
+                localStorage.removeItem(key);
+                return fallback;
+            }
+        };
+
+        const normalizePrompts = (value) => Array.isArray(value) ? value.map((p, i) => ({
+            id: String(p?.id || `prompt_${Date.now()}_${i}`),
+            title: typeof p?.title === 'string' ? p.title : '名称未設定',
+            content: typeof p?.content === 'string' ? p.content : '',
+            folderId: p?.folderId || null,
+            history: Array.isArray(p?.history) ? p.history : []
+        })) : [];
+
+        const normalizeFolders = (value) => Array.isArray(value) ? value.map((f, i) => ({
+            id: String(f?.id || `folder_${Date.now()}_${i}`),
+            name: typeof f?.name === 'string' ? f.name : '名称未設定フォルダ',
+            isExpanded: typeof f?.isExpanded === 'boolean' ? f.isExpanded : true
+        })) : [];
+
+        const normalizeTemplates = (value) => Array.isArray(value) ? value.map((t, i) => ({
+            id: String(t?.id || `template_${Date.now()}_${i}`),
+            name: typeof t?.name === 'string' ? t.name : '名称未設定',
+            text: typeof t?.text === 'string' ? t.text : ''
+        })) : defaultTemplates;
+
+        const parseMarkdown = (text) => {
+            try {
+                if (window.marked?.parse) return window.marked.parse(text, { breaks: true });
+                if (typeof window.marked === 'function') return window.marked(text, { breaks: true });
+            } catch (err) {
+                console.error('Markdownプレビューに失敗しました', err);
+            }
+            return String(text).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).replace(/\n/g, '<br>');
+        };
 
         const defaultTemplates = [
             { id: 't1', name: '# 前提条件', text: '\n# 前提条件\n- ' },
@@ -65,19 +130,20 @@
             const textareaRef = useRef(null);
 
             useEffect(() => {
-                const savedPrompts = localStorage.getItem('pm_prompts');
-                const savedFolders = localStorage.getItem('pm_folders');
-                const savedTemplates = localStorage.getItem('pm_templates');
-                
-                if (savedPrompts) setPrompts(JSON.parse(savedPrompts));
-                if (savedFolders) setFolders(JSON.parse(savedFolders));
-                if (savedTemplates) setTemplates(JSON.parse(savedTemplates));
+                setPrompts(normalizePrompts(safeJsonParse('pm_prompts', [])));
+                setFolders(normalizeFolders(safeJsonParse('pm_folders', [])));
+                setTemplates(normalizeTemplates(safeJsonParse('pm_templates', defaultTemplates)));
             }, []);
 
             useEffect(() => {
-                localStorage.setItem('pm_prompts', JSON.stringify(prompts));
-                localStorage.setItem('pm_folders', JSON.stringify(folders));
-                localStorage.setItem('pm_templates', JSON.stringify(templates));
+                try {
+                    localStorage.setItem('pm_prompts', JSON.stringify(prompts));
+                    localStorage.setItem('pm_folders', JSON.stringify(folders));
+                    localStorage.setItem('pm_templates', JSON.stringify(templates));
+                } catch (err) {
+                    console.error('保存に失敗しました', err);
+                    alert('ブラウザへの保存に失敗しました。容量不足の可能性があります。バックアップを取ってください。');
+                }
             }, [prompts, folders, templates]);
 
             const activePrompt = prompts.find(p => p.id === activeId);
@@ -280,7 +346,12 @@
                 document.addEventListener("mouseup", onMouseUp);
             }, [sidebarWidth]);
 
-            const filteredPrompts = prompts.filter(p => p.title.toLowerCase().includes(searchTerm.toLowerCase()) || p.content.toLowerCase().includes(searchTerm.toLowerCase()));
+            const filteredPrompts = prompts.filter(p => {
+                const term = searchTerm.toLowerCase();
+                const title = String(p?.title || '').toLowerCase();
+                const content = String(p?.content || '').toLowerCase();
+                return title.includes(term) || content.includes(term);
+            });
 
             // プロンプト項目UI（スマホでも絶対に見えるように改善）
             const PromptItem = ({ prompt, isFirst, isLast }) => (
@@ -495,7 +566,7 @@
                                     ) : (
                                         <div 
                                             className="w-full h-full p-6 border border-gray-200 shadow-sm rounded bg-white overflow-y-auto markdown-body"
-                                            dangerouslySetInnerHTML={{ __html: marked.parse(activePrompt.content || '*プレビューするテキストがありません*', { breaks: true }) }}
+                                            dangerouslySetInnerHTML={{ __html: parseMarkdown(activePrompt.content || '*プレビューするテキストがありません*') }}
                                         ></div>
                                     )}
                                 </div>
@@ -538,17 +609,28 @@
             );
         };
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        try {
+            if (!window.React || !window.ReactDOM) {
+                throw new Error('React または ReactDOM の読み込みに失敗しました。CDNへのアクセスを確認してください。');
+            }
+            const root = ReactDOM.createRoot(document.getElementById('root'));
+            root.render(<App />);
+        } catch (err) {
+            showFatalError(err.message, err.stack || '');
+        }
     </script>
  
     <script>
+      // 以前の版で登録した Service Worker が古いファイルを返すことがあるため、この版では無効化します。
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
-          navigator.serviceWorker.register("./sw.js")
-            .then(() => console.log("Service Worker registered"))
-            .catch((error) => console.log("Service Worker registration failed:", error));
+          navigator.serviceWorker.getRegistrations()
+            .then(registrations => registrations.forEach(reg => reg.unregister()))
+            .catch(error => console.log("Service Worker cleanup failed:", error));
         });
+      }
+      if (window.caches) {
+        caches.keys().then(keys => keys.forEach(key => caches.delete(key))).catch(() => {});
       }
     </script>
 </body>
